@@ -1,0 +1,139 @@
+{
+  "variables": {
+    "aws_region": "{{env `AWS_REGION`}}",
+    "aws_access_key": "{{env `AWS_ACCESS_KEY_ID`}}",
+    "aws_secret_key": "{{env `AWS_SECRET_ACCESS_KEY`}}",
+    "install_auth_signing_script": "true",
+    "tls_private_key_path": "vault.key.pem",
+    "tls_public_key_path": "vault.crt.pem",
+    "ca_public_key_path": "ca.crt.pem",
+    "consul_download_url": "https://releases.hashicorp.com/consul/1.6.2/consul_1.6.2_linux_amd64.zip",
+    "consul_module_version": "v0.7.3",
+    "consul_version": "1.6.2",
+    "vault_download_url": "https://releases.hashicorp.com/vault/1.3.0/vault_1.3.0_linux_amd64.zip",
+    "vault_version": "1.3.0"
+  },
+  "builders": [
+    {
+      "access_key": "{{user `aws_access_key`}}",
+      "secret_key": "{{user `aws_secret_key`}}",
+      "region": "{{user `aws_region`}}",
+      "ami_description": "An Amazon Linux 2 AMI that has Vault and Consul installed",
+      "ami_name": "carrot-vault-consul-amazon-linux-2-{{timestamp}}",
+      "instance_type": "t2.micro",
+      "name": "amazon-linux-2-ami",
+      "source_ami_filter": {
+        "filters": {
+          "architecture": "x86_64",
+          "virtualization-type": "hvm",
+          "block-device-mapping.volume-type": "gp2",
+          "name": "*amzn2-ami-hvm-*",
+          "root-device-type": "ebs"
+        },
+        "most_recent": true,
+        "owners": [
+          "amazon"
+        ]
+      },
+      "ssh_username": "ec2-user",
+      "type": "amazon-ebs"
+    }
+  ],
+  "min_packer_version": "1.4.0",
+  "provisioners": [
+    {
+      "inline": [
+        "mkdir -p /tmp/terraform-aws-vault/modules"
+      ],
+      "type": "shell"
+    },
+    {
+      "destination": "/tmp/terraform-aws-vault/modules",
+      "pause_before": "30s",
+      "source": "{{template_dir}}/modules/",
+      "type": "file"
+    },
+    {
+      "inline": [
+        "if test -n \"{{user `vault_download_url`}}\"; then",
+        " /tmp/terraform-aws-vault/modules/install-vault/install-vault --download-url {{user `vault_download_url`}};",
+        "else",
+        " /tmp/terraform-aws-vault/modules/install-vault/install-vault --version {{user `vault_version`}};",
+        "fi"
+      ],
+      "type": "shell"
+    },
+    {
+      "destination": "/tmp/sign-request.py",
+      "source": "{{template_dir}}/auth/sign-request.py",
+      "type": "file"
+    },
+    {
+      "destination": "/tmp/ca.crt.pem",
+      "source": "{{user `ca_public_key_path`}}",
+      "type": "file"
+    },
+    {
+      "destination": "/tmp/vault.crt.pem",
+      "source": "{{user `tls_public_key_path`}}",
+      "type": "file"
+    },
+    {
+      "destination": "/tmp/vault.key.pem",
+      "source": "{{user `tls_private_key_path`}}",
+      "type": "file"
+    },
+    {
+      "inline": [
+        "if [[ '{{user `install_auth_signing_script`}}' == 'true' ]]; then",
+        "sudo mv /tmp/sign-request.py /opt/vault/scripts/",
+        "else",
+        "sudo rm /tmp/sign-request.py",
+        "fi",
+        "sudo mv /tmp/ca.crt.pem /opt/vault/tls/",
+        "sudo mv /tmp/vault.crt.pem /opt/vault/tls/",
+        "sudo mv /tmp/vault.key.pem /opt/vault/tls/",
+        "sudo chown -R vault:vault /opt/vault/tls/",
+        "sudo chmod -R 600 /opt/vault/tls",
+        "sudo chmod 700 /opt/vault/tls",
+        "sudo /tmp/terraform-aws-vault/modules/update-certificate-store/update-certificate-store --cert-file-path /opt/vault/tls/ca.crt.pem"
+      ],
+      "inline_shebang": "/bin/bash -e",
+      "type": "shell"
+    },
+    {
+      "inline": [
+        "sudo yum install -y git",
+        "if [[ '{{user `install_auth_signing_script`}}' == 'true' ]]; then",
+        "sudo yum install -y python2-pip",
+        "LC_ALL=C \u0026\u0026 sudo pip install boto3",
+        "fi"
+      ],
+      "only": [
+        "amazon-linux-2-ami"
+      ],
+      "type": "shell"
+    },
+    {
+      "inline": [
+        "git clone --branch {{user `consul_module_version`}} https://github.com/hashicorp/terraform-aws-consul.git /tmp/terraform-aws-consul",
+        "if test -n \"{{user `consul_download_url`}}\"; then",
+        " /tmp/terraform-aws-consul/modules/install-consul/install-consul --download-url {{user `consul_download_url`}};",
+        "else",
+        " /tmp/terraform-aws-consul/modules/install-consul/install-consul --version {{user `consul_version`}};",
+        "fi"
+      ],
+      "pause_before": "30s",
+      "type": "shell"
+    },
+    {
+      "inline": [
+        "/tmp/terraform-aws-consul/modules/install-dnsmasq/install-dnsmasq"
+      ],
+      "only": [
+        "amazon-linux-2-ami"
+      ],
+      "type": "shell"
+    }
+  ]
+}
