@@ -105,4 +105,3 @@ the [Releases Page](https://github.com/hashicorp/terraform-aws-vault/releases) f
 use a fixed, known version of this Module, downloaded from the official Git repo. On the other hand, when you're
 just experimenting with the Module, it's OK to use a local checkout of the Module, uploaded from your own
 computer.
-# vault-consul-ami
