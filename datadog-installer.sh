@@ -71,8 +71,16 @@ function log_collection() {
         return 0
     fi
 
-    sed -i 's/# logs_enabled: false/ logs_enabled: true/g' "$DATADOG_CONFIG_DIR"
+    sed -i 's/# logs_enabled: false/logs_enabled: true/g' "$DATADOG_CONFIG_DIR"
     echo "$CONFIGURATION_LOGS" >> "$AGENT_CONFIG_DIR"
+    systemctl restart datadog-agent
+}
+
+function metrics_collection() {
+    sed -i 's/# catalog_checks: false/catalog_checks: true/g' "$AGENT_CONFIG_DIR"
+    sed -i 's/# network_latency_checks: false/network_latency_checks: true/g' "$AGENT_CONFIG_DIR"
+    sed -i 's/# self_leader_check: false/self_leader_check: true/g' "$AGENT_CONFIG_DIR"
+    sed -i 's/# log_requests: false/log_requests: true/g' "$AGENT_CONFIG_DIR"
     systemctl restart datadog-agent
 }
 
