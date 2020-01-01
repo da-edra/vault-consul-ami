@@ -46,43 +46,68 @@ if [ "$AGENT_VAL" != 'vault' ] && [ "$AGENT_VAL" != 'consul' ]; then
 fi
 
 AGENT_CONFIG_URL="https://raw.githubusercontent.com/DataDog/integrations-core/master/${AGENT_VAL}/datadog_checks/${AGENT_VAL}/data/conf.yaml.example"
-AGENT_CONFIG_DIR="/etc/datadog-agent/conf.d/${AGENT_VAL}.d/conf.yaml"
-DATADOG_CONFIG_DIR="/etc/datadog-agent/datadog.yaml"
-LOGS_CONFIG="
-  logs:
-      - type: file
-        path: /var/log/consul_server.log
-        source: consul
-        service: myservice"
+DD_CONFIG_DIR="/etc/datadog-agent/"
+AGENT_CONFIG_DIR="${DD_CONFIG_DIR}conf.d/${AGENT_VAL}.d/conf.yaml"
+DATADOG_CONFIG_DIR="${DD_CONFIG_DIR}datadog.yaml"
+CONSUL_CONFIG_DIR="/opt/consul/config/default.json"
+
+function configure_timezone() {
+    echo 'ZONE="America/Mexico_City"' >> /etc/sysconfig/clock
+    sudo ln -sf /usr/share/zoneinfo/America/Mexico_City /etc/localtime
+}
 
 function install_datadog() {
     DD_AGENT_MAJOR_VERSION=7 DD_API_KEY="$API_KEY" bash -c "$(curl -L https://raw.githubusercontent.com/DataDog/datadog-agent/master/cmd/agent/install_script.sh)"
     curl "$AGENT_CONFIG_URL" -o "$AGENT_CONFIG_DIR"
-
-    if [ -n "$TLS_FLAG" ] && [ "$AGENT_VAL" == 'consul' ]; then
-        sed -i 's/http:/https:/g' "$AGENT_CONFIG_DIR"
-    fi
-
-    systemctl restart datadog-agent
 }
 
-function log_collection() {
+function logs_collection() {
     if [ "$AGENT_VAL" != 'consul' ]; then
         return 0
     fi
 
+    local LOGS_CONFIG="logs:
+  - type: journald
+    path: /var/log/journal/
+    include_units:
+      - consul.service"
+
+    usermod -a -G systemd-journal dd-agent
     sed -i 's/# logs_enabled: false/logs_enabled: true/g' "$DATADOG_CONFIG_DIR"
-    echo "$CONFIGURATION_LOGS" >> "$AGENT_CONFIG_DIR"
-    systemctl restart datadog-agent
+    mkdir -p "$DD_CONFIG_DIR"conf.d/journald.d/; echo "$LOGS_CONFIG" >> "$_"/conf.yaml
 }
 
 function metrics_collection() {
-    sed -i 's/# catalog_checks: false/catalog_checks: true/g' "$AGENT_CONFIG_DIR"
-    sed -i 's/# network_latency_checks: false/network_latency_checks: true/g' "$AGENT_CONFIG_DIR"
-    sed -i 's/# self_leader_check: false/self_leader_check: true/g' "$AGENT_CONFIG_DIR"
-    sed -i 's/# log_requests: false/log_requests: true/g' "$AGENT_CONFIG_DIR"
-    systemctl restart datadog-agent
+    if [ "$AGENT_VAL" == 'vault' ]; then
+        sed -i 's/# detect_leader: false/detect_leader: false/g' "$AGENT_CONFIG_DIR"
+        return 0
+    fi
+
+    local CONSUL_METRICS=(
+        '# catalog_checks: false/catalog_checks: true'
+        '# network_latency_checks: false/network_latency_checks: true'
+        '# self_leader_check: false/self_leader_check: true'
+        '# log_requests: false/log_requests: true'
+    )
+
+    local DOGSTATSD_CONFIG='\"ui\": true,
+    \"telemetry\": {
+	      \"dogstatsd_addr\": \"127.0.0.1:8125\"
+    }'
+
+    if [ -n "$TLS_FLAG" ]; then
+        CONSUL_METRICS+=('http:/https:')
+    fi
+
+    for i in "${CONSUL_METRICS[@]}"; do
+        sed -i 's/'"$i"'/g' "$AGENT_CONFIG_DIR"
+    done
+
+    sed -i 's/\"ui\": true/'{$DOGSTATSD_CONFIG}'/g' "$CONSUL_CONFIG_DIR"
 }
 
+configure_timezone
 install_datadog
-log_collection
+logs_collection
+metrics_collection
+systemctl restart datadog-agent
