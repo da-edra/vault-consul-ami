@@ -80,6 +80,8 @@ function logs_collection() {
 function metrics_collection() {
     if [ "$AGENT_VAL" == 'vault' ]; then
         sed -i 's/# detect_leader: false/detect_leader: false/g' "$AGENT_CONFIG_DIR"
+        systemctl reload vault
+        systemctl restart vault
         return 0
     fi
 
