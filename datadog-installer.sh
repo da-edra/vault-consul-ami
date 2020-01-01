@@ -74,7 +74,7 @@ function logs_collection() {
 
     usermod -a -G systemd-journal dd-agent
     sed -i 's/# logs_enabled: false/logs_enabled: true/g' "$DATADOG_CONFIG_DIR"
-    mkdir -p "$DD_CONFIG_DIR"conf.d/journald.d/; echo "$LOGS_CONFIG" >> "$_"/conf.yaml
+    mkdir -p "$DD_CONFIG_DIR"conf.d/journald.d/; echo "$LOGS_CONFIG" > "$_"/conf.yaml
 }
 
 function metrics_collection() {
@@ -90,10 +90,7 @@ function metrics_collection() {
         '# log_requests: false/log_requests: true'
     )
 
-    local DOGSTATSD_CONFIG='\"ui\": true,
-    \"telemetry\": {
-	      \"dogstatsd_addr\": \"127.0.0.1:8125\"
-    }'
+    local DOGSTATSD_CONFIG='"telemetry": { "dogstatsd_addr": "127.0.0.1:8125" }'
 
     if [ -n "$TLS_FLAG" ]; then
         CONSUL_METRICS+=('http:/https:')
@@ -103,7 +100,11 @@ function metrics_collection() {
         sed -i 's/'"$i"'/g' "$AGENT_CONFIG_DIR"
     done
 
-    sed -i 's/\"ui\": true/'{$DOGSTATSD_CONFIG}'/g' "$CONSUL_CONFIG_DIR"
+    cp "$CONSUL_CONFIG_DIR" "$CONSUL_CONFIG_DIR".tmp
+    jq ". + { $DOGSTATSD_CONFIG }" "$CONSUL_CONFIG_DIR".tmp > "$CONSUL_CONFIG_DIR"
+    rm "$CONSUL_CONFIG_DIR".tmp
+    systemctl reload consul
+    systemctl restart consul
 }
 
 configure_timezone
@@ -111,3 +112,4 @@ install_datadog
 logs_collection
 metrics_collection
 systemctl restart datadog-agent
+netstat -nup | grep "127.0.0.1:8125.*ESTABLISHED"
